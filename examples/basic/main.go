@@ -15,7 +15,7 @@ func main() {
 		panic(err)
 	}
 	defer idx.Close()
-
+      
 	_, err = idx.AddBatch([]document.Document{
 		{ID: "go", Fields: map[string]string{"title": "Learning Go", "content": "Go is fast", "category": "book"}},
 		{ID: "systems", Fields: map[string]string{"title": "Systems", "content": "A distributed system written in Golang", "category": "article"}},

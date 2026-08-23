@@ -1,21 +1,23 @@
 # Koris
 
-Koris 是一个使用 Go 从零实现的轻量级嵌入式全文搜索引擎。它实现自己的分析链、倒排索引、词典、posting、查询执行和 BM25 排序；没有调用 Bleve、Lucene 等第三方搜索引擎。唯一的运行时依赖 `bbolt` 只负责可选的持久化键值存储。
+[中文](README_CN.md) | English
 
-## 功能
+Koris is a lightweight embedded full-text search engine implemented from scratch in Go. It provides its own analysis pipeline, inverted index, term dictionary, postings, query execution, and BM25 ranking. It does not call third-party search engines such as Bleve or Lucene; its only runtime dependency, `bbolt`, is used solely as an optional persistent key-value store.
 
-- 文档与字段级检索，用户字符串 ID + 稳定内部 `uint64` DocID
-- Unicode Standard / Whitespace / Simple tokenizer
-- Trie 中文词典、正向/逆向/双向最大匹配、BMES-HMM Viterbi 分词
-- Lowercase、StopWord、英文词干过滤器和可复用 TokenStream
-- 词典、压缩 posting、词频、位置、文档长度和全局统计
-- Term、Match、Boolean、Phrase/Slop、Prefix 和 Fuzzy 查询
-- Okapi BM25 排序、结果解释、查询字符串解析
-- 高亮、低基数字段分面、posting 跳表迭代
-- MemoryStore 和 BboltStore，原子批量写入、回滚、更新、删除与重建
-- 并发安全读写、完整性检查、单元测试和 Benchmark
+## Features
 
-## 快速开始
+- Document and field-level search with user-defined string IDs and stable internal `uint64` document IDs
+- Unicode-aware Standard, Whitespace, and Simple tokenizers
+- Trie-based Chinese dictionaries, forward/reverse/bidirectional maximum matching, and BMES-HMM Viterbi segmentation
+- Lowercase, stop-word, and English stemming filters, plus reusable token streams
+- Term dictionary, compressed postings, term frequency, positions, document lengths, and global statistics
+- Term, Match, Boolean, Phrase/Slop, Prefix, and Fuzzy queries
+- Okapi BM25 ranking, lightweight explanations, and query-string parsing
+- Highlighting, low-cardinality field facets, and posting skip iterators
+- MemoryStore and BboltStore with atomic batches, rollback, update, delete, and rebuild support
+- Concurrent-safe reads and writes, consistency checks, unit tests, race tests, and benchmarks
+
+## Quick Start
 
 ```go
 package main
@@ -59,13 +61,13 @@ func main() {
 }
 ```
 
-持久化索引只需将 `koris.New()` 换成：
+For a persistent index, replace `koris.New()` with:
 
 ```go
 idx, err := koris.Open("./data/koris.db")
 ```
 
-查询字符串 API 支持字段、短语、前缀和布尔运算：
+The query-string API supports fields, phrases, prefixes, and Boolean operators:
 
 ```go
 hits, err := idx.SearchString(
@@ -75,7 +77,7 @@ hits, err := idx.SearchString(
 )
 ```
 
-## 常用查询
+## Common Queries
 
 ```go
 query.TermQuery{Field: "content", Term: "golang"}
@@ -89,11 +91,11 @@ query.BooleanQuery{
 }
 ```
 
-TermQuery 接收已经分析过的精确 term；原始用户文本应使用 MatchQuery 或 `SearchString`。
+`TermQuery` accepts an exact term that has already been analyzed. Use `MatchQuery` or `SearchString` for raw user input.
 
-## 分析器配置
+## Analyzer Configuration
 
-索引与查询共用同一字段分析器：
+Indexing and querying share the same field analyzer:
 
 ```go
 chinese := analysis.PipelineAnalyzer{
@@ -105,11 +107,11 @@ chinese := analysis.PipelineAnalyzer{
 idx, err := koris.New(koris.WithFieldAnalyzer("content", chinese))
 ```
 
-需要统计模型时可改用 `tokenizer.NewHMMTokenizer(model)`；`HMMModel` 接收训练后的 BMES 起始、转移和发射对数概率。
+For statistical segmentation, use `tokenizer.NewHMMTokenizer(model)`. `HMMModel` accepts trained BMES start, transition, and emission log probabilities.
 
-## 一致性与恢复
+## Consistency and Recovery
 
-每个 Add、Update、Delete 和 AddBatch 都在一个 Store 事务内更新文档、posting、词典与统计。`Check` 进行只读全量审计；`Rebuild` 从原始文档原子重建全部派生数据：
+Every Add, Update, Delete, and AddBatch operation updates the document, postings, dictionary, and statistics within one Store transaction. `Check` performs a full read-only audit, while `Rebuild` atomically recreates all derived data from the original documents:
 
 ```go
 report, err := idx.Check()
@@ -118,7 +120,7 @@ if err == nil && !report.Valid() {
 }
 ```
 
-## 测试与 Benchmark
+## Tests and Benchmarks
 
 ```bash
 go test ./...
@@ -126,8 +128,8 @@ go test -race ./...
 go test -run '^$' -bench . -benchmem ./...
 ```
 
-详细设计参见 [架构设计](docs/architecture.md)、[存储 Schema](docs/storage-schema.md) 和 [设计决策](docs/design-decisions.md)。可运行示例位于 `examples/basic`。
+For implementation details, see the [architecture](docs/architecture_en.md), [storage schema](docs/storage-schema_en.md), and [design decisions](docs/design-decisions_en.md). A runnable example is available under `examples/basic`.
 
-## 许可证
+## License
 
 [MIT](LICENSE)
