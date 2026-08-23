@@ -1,11 +1,16 @@
 package query
 
-// BooleanQuery combines arbitrary child queries. Must clauses intersect,
-// Should clauses add score (and form the candidate set when Must is empty), and
-// MustNot clauses exclude matching documents.
+// BooleanQuery 组合任意子 Query。
+//
+// Must 取交集并累加分数；Should 在没有 Must 时形成并集，有 Must 时仅给已有候选
+// 加分；MustNot 删除候选。只有 MustNot 时会以全部有效文档为初始集合，这与常见
+// 搜索引擎的纯否定查询语义一致。
 type BooleanQuery struct {
-	Must    []Query
-	Should  []Query
+	// Must 中的每个子查询都必须命中。
+	Must []Query
+	// Should 是可选加分子句；没有 Must 时至少需要命中一个 Should。
+	Should []Query
+	// MustNot 中任一子查询命中都会排除文档。
 	MustNot []Query
 }
 
@@ -18,6 +23,7 @@ func (q BooleanQuery) Execute(searcher Searcher) ([]Hit, error) {
 		}
 		clauseScores := hitScoreMap(hits)
 		if clauseIndex == 0 {
+			// 第一条 Must 直接建立候选集，后续 Must 原地求交，避免额外 map。
 			candidates = clauseScores
 			continue
 		}
@@ -48,6 +54,7 @@ func (q BooleanQuery) Execute(searcher Searcher) ([]Hit, error) {
 	if candidates == nil {
 		candidates = make(map[uint64]float64)
 		if len(q.MustNot) > 0 {
+			// 纯否定查询必须先取全集，否则从空集合删除仍然永远为空。
 			ids, err := searcher.AllDocumentIDs()
 			if err != nil {
 				return nil, err

@@ -1,10 +1,13 @@
 package query
 
-// TermQuery performs an exact analyzed-term lookup. Use MatchQuery when raw
-// user text still needs analysis.
+// TermQuery 执行一个字段内的精确 term 查询。
+// Term 不会再次经过 Analyzer，适合调用者已经持有规范化 term 的场景；原始用户
+// 文本应使用 MatchQuery，否则大小写、停用词和 stemming 可能与索引不一致。
 type TermQuery struct {
+	// Field 是目标字段。
 	Field string
-	Term  string
+	// Term 必须是与索引 Analyzer 输出一致的规范化词项。
+	Term string
 }
 
 func (q TermQuery) Execute(searcher Searcher) ([]Hit, error) {
@@ -23,6 +26,8 @@ func (q TermQuery) Execute(searcher Searcher) ([]Hit, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Explanation 需要 TF；排序后的 Hit 已不再直接携带 Posting，所以建立一次
+	// DocID→Frequency 映射补充轻量解释。
 	byID := make(map[uint64]uint32, len(postings))
 	for _, posting := range postings {
 		byID[posting.DocID] = posting.Frequency

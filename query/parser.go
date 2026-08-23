@@ -7,10 +7,14 @@ import (
 	"unicode"
 )
 
+// ErrInvalidQuery 表示查询字符串存在未闭合引号/括号、缺失操作数或空字段值。
 var ErrInvalidQuery = errors.New("query: invalid expression")
 
-// Parse supports field:value, quoted phrases, trailing prefix wildcards,
-// parentheses and the AND/OR/NOT Boolean operators. Adjacent clauses imply OR.
+// Parse 把查询字符串转换为可执行 Query 树。
+//
+// 支持 field:value、双引号短语、尾部前缀通配符、括号和 AND/OR/NOT；相邻子句
+// 隐式 OR。运算优先级为 NOT > AND > OR。defaultField 用于没有 field: 的原子项。
+// 解析器不执行 Analyzer，具体 Query 在 Execute 时使用 Searcher 的字段配置。
 func Parse(expression, defaultField string) (Query, error) {
 	lexer, err := lex(expression)
 	if err != nil {
@@ -47,6 +51,7 @@ const (
 )
 
 func lex(expression string) ([]lexToken, error) {
+	// Lexer 按 rune 扫描以正确识别 Unicode 空白；引号内的空白属于同一个 atom。
 	runes := []rune(expression)
 	result := make([]lexToken, 0)
 	for i := 0; i < len(runes); {
@@ -80,6 +85,7 @@ func lex(expression string) ([]lexToken, error) {
 			return nil, fmt.Errorf("%w: unclosed quote", ErrInvalidQuery)
 		}
 		value := string(runes[start:i])
+		// 操作符只在完整 atom 上、且不在引号内时识别，字段值中的 and 不会误判。
 		kind := atomToken
 		switch strings.ToUpper(value) {
 		case "AND":
@@ -101,12 +107,15 @@ type expressionParser struct {
 }
 
 func (p *expressionParser) parseOr() (Query, error) {
+	// 递归下降的函数层级直接编码优先级：parseOr 调 parseAnd，parseAnd 再调
+	// parseUnary，因此更高优先级的节点先构建。
 	left, err := p.parseAnd()
 	if err != nil {
 		return nil, err
 	}
 	for p.index < len(p.tokens) {
 		kind := p.tokens[p.index].kind
+		// 下一个 token 可开始新子句但中间没有显式操作符时，按隐式 OR 处理。
 		implicit := kind == atomToken || kind == leftParenToken || kind == notToken
 		if kind != orToken && !implicit {
 			break
@@ -140,6 +149,7 @@ func (p *expressionParser) parseAnd() (Query, error) {
 }
 
 func (p *expressionParser) parseUnary() (Query, error) {
+	// NOT 递归调用自身，所以 NOT NOT term 也能自然解析。
 	if p.index < len(p.tokens) && p.tokens[p.index].kind == notToken {
 		p.index++
 		child, err := p.parseUnary()
@@ -176,6 +186,7 @@ func (p *expressionParser) parsePrimary() (Query, error) {
 }
 
 func atomQuery(value, defaultField string) (Query, error) {
+	// 只在第一个冒号处分割，后续冒号保留给 URL 等字段值。
 	field, text := defaultField, value
 	if colon := strings.IndexByte(value, ':'); colon >= 0 {
 		field, text = value[:colon], value[colon+1:]
@@ -190,6 +201,7 @@ func atomQuery(value, defaultField string) (Query, error) {
 		return PhraseQuery{Field: field, Text: strings.Trim(text, "\"")}, nil
 	}
 	if strings.HasSuffix(text, "*") && len(text) > 1 {
+		// 仅支持尾部单星号前缀查询；中间通配和正则不在当前语法范围内。
 		return PrefixQuery{Field: field, Prefix: strings.TrimSuffix(text, "*")}, nil
 	}
 	return MatchQuery{Field: field, Text: text}, nil

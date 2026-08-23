@@ -1,4 +1,4 @@
-// Package highlight produces safe snippets from analyzed token offsets.
+// Package highlight 根据 Analyzer 生成的原文 offset 构造安全搜索摘要。
 package highlight
 
 import (
@@ -9,31 +9,42 @@ import (
 	"github.com/23jdd/Koris/analysis"
 )
 
+// Options 控制高亮标签、片段长度和 HTML 安全策略。
+// FragmentSize 使用 UTF-8 字节数，边界会自动调整到合法字符起点。
 type Options struct {
-	PreTag       string
-	PostTag      string
+	// PreTag 与 PostTag 包裹命中的原文 token；它们不会被 HTML escape。
+	PreTag  string
+	PostTag string
+	// FragmentSize 是每个摘要目标字节数，实际值可能为保证 UTF-8 完整略微扩展。
 	FragmentSize int
+	// MaxFragments 限制返回片段数；非正数使用默认值。
 	MaxFragments int
-	EscapeHTML   bool
+	// EscapeHTML 控制是否转义片段原文。输出到 HTML 时应保持 true。
+	EscapeHTML bool
 }
 
+// DefaultOptions 返回 HTML 安全的 <em> 高亮配置，每篇文档最多一个 160 字节片段。
 func DefaultOptions() Options {
 	return Options{PreTag: "<em>", PostTag: "</em>", FragmentSize: 160, MaxFragments: 1, EscapeHTML: true}
 }
 
+// Fragment 包含渲染后的文本，以及该片段在原文中的半开字节区间 [Start, End)。
 type Fragment struct {
 	Text  string `json:"text"`
 	Start int    `json:"start"`
 	End   int    `json:"end"`
 }
 
-// Extract highlights tokens whose normalized terms are in terms. Fragments
-// are byte-safe and overlap is coalesced.
+// Extract 高亮经过 Analyzer 归一化后存在于 terms 的 token。
+//
+// 相近命中会合并到同一片段，UTF-8 边界会校正，EscapeHTML 开启时只转义原文，
+// PreTag/PostTag 被视为调用方可信模板。没有命中或参数为空时返回 nil。
 func Extract(analyzer analysis.Analyzer, text string, terms []string, options Options) []Fragment {
 	if analyzer == nil || text == "" || len(terms) == 0 {
 		return nil
 	}
 	applyDefaults(&options)
+	// 查询词也走同一个 Analyzer，确保 GO 能匹配索引/原文中的 go。
 	wanted := make(map[string]struct{}, len(terms))
 	for _, term := range terms {
 		for _, token := range analyzer.Analyze(term) {
@@ -49,6 +60,7 @@ func Extract(analyzer analysis.Analyzer, text string, terms []string, options Op
 	if len(matches) == 0 {
 		return nil
 	}
+	// 先按距离把命中聚成片段候选，再应用 MaxFragments，避免同一区域重复输出。
 	groups := groupMatches(matches, options.FragmentSize)
 	if len(groups) > options.MaxFragments {
 		groups = groups[:options.MaxFragments]
@@ -96,6 +108,7 @@ func groupMatches(matches []span, size int) []span {
 }
 
 func fragmentBounds(text string, matchStart, matchEnd, size int) (int, int) {
+	// 尽量让命中位于片段中间；靠近开头/结尾时把剩余额度移到另一侧。
 	half := (size - (matchEnd - matchStart)) / 2
 	if half < 0 {
 		half = 0
@@ -115,6 +128,7 @@ func fragmentBounds(text string, matchStart, matchEnd, size int) (int, int) {
 			start = 0
 		}
 	}
+	// 字节窗口可能切到多字节 rune 中间，向外移动到合法 UTF-8 边界。
 	for start > 0 && !isUTF8Start(text[start]) {
 		start--
 	}
@@ -138,6 +152,7 @@ func render(text string, matches []span, start, end int, options Options) string
 	var builder strings.Builder
 	cursor := start
 	write := func(value string) {
+		// 只 escape 原始文本，不 escape 标签；标签来自 Options，必须由调用方控制。
 		if options.EscapeHTML {
 			builder.WriteString(html.EscapeString(value))
 		} else {
