@@ -6,8 +6,11 @@ import (
 	"github.com/23jdd/Koris/analysis"
 )
 
-// StemmerFilter performs conservative English suffix stemming. It handles the
-// common inflections without turning the analyzer into a language dependency.
+// StemmerFilter 执行保守的英文后缀词干化，例如 running → run。
+//
+// 这里不是完整 Porter2 实现：规则刻意偏保守，目标是处理常见屈折变化，同时
+// 避免引入语言库或把差异很大的词过度合并。需要严格语言学行为时应替换为自定义
+// TokenFilter，并确保写入与查询端配置一致。
 type StemmerFilter struct{}
 
 func (StemmerFilter) Filter(tokens []analysis.Token) []analysis.Token {

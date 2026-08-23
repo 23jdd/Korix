@@ -6,7 +6,8 @@ import (
 	"github.com/23jdd/Koris/analysis"
 )
 
-// SimpleTokenizer emits contiguous Unicode letters and digits.
+// SimpleTokenizer 把连续 Unicode 字母或数字组成一个 term，其余字符均作为分隔符。
+// 例如 "Hello, Go123!" 输出 Hello 与 Go123；它不会尝试识别 URL 或 Email。
 type SimpleTokenizer struct{}
 
 func (SimpleTokenizer) Tokenize(text string) []analysis.Token {

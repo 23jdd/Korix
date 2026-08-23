@@ -1,4 +1,4 @@
-// Package filter provides reusable token filters.
+// Package filter 提供可组合、与索引无关的 token 过滤器。
 package filter
 
 import (
@@ -7,7 +7,8 @@ import (
 	"github.com/23jdd/Koris/analysis"
 )
 
-// LowercaseFilter applies Unicode lower casing.
+// LowercaseFilter 使用 Unicode 规则统一小写，使 GO、Go 与 go 命中同一词项。
+// Filter 会复制输入 slice，避免修改上游或调用者仍在使用的 Token。
 type LowercaseFilter struct{}
 
 func (LowercaseFilter) Filter(tokens []analysis.Token) []analysis.Token {
