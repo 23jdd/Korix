@@ -10,6 +10,8 @@ import (
 	"github.com/23jdd/Koris/storage"
 )
 
+// Document 按内部 DocID 返回原始文档副本。Store 的 NotFound 被转换成稳定的
+// ErrDocumentMissing，调用方无需依赖后端错误。
 func (i *Index) Document(docID uint64) (document.Document, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -23,6 +25,8 @@ func (i *Index) Document(docID uint64) (document.Document, error) {
 	return doc.Clone(), nil
 }
 
+// DocumentByID 先解析外部字符串 ID，再读取原始文档。返回深拷贝，调用方修改
+// Fields 不会改变索引内容。
 func (i *Index) DocumentByID(externalID string) (document.Document, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -40,6 +44,7 @@ func (i *Index) DocumentByID(externalID string) (document.Document, error) {
 	return doc.Clone(), nil
 }
 
+// Metadata 返回 BM25 所需的公开文档统计，不暴露内部 term vector。
 func (i *Index) Metadata(docID uint64) (DocumentMetadata, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -53,6 +58,8 @@ func (i *Index) Metadata(docID uint64) (DocumentMetadata, error) {
 	return metadata.DocumentMetadata, nil
 }
 
+// Stats 返回文档总数、字段总长度和下一 DocID。值由 JSON 解码得到，map 不与
+// Store 内存共享，调用方可安全读取或复制。
 func (i *Index) Stats() (GlobalStats, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -61,7 +68,8 @@ func (i *Index) Stats() (GlobalStats, error) {
 	return stats, err
 }
 
-// QueryMetadata is the dependency-neutral metadata view consumed by queries.
+// QueryMetadata 是 Query 层使用的无包循环 metadata 视图。它复制 Lengths map，
+// 防止查询实现意外修改 Index 返回的统计。
 func (i *Index) QueryMetadata(docID uint64) (string, map[string]uint32, error) {
 	metadata, err := i.Metadata(docID)
 	if err != nil {
@@ -74,7 +82,7 @@ func (i *Index) QueryMetadata(docID uint64) (string, map[string]uint32, error) {
 	return metadata.ExternalID, lengths, nil
 }
 
-// SearchStats is the dependency-neutral global view consumed by queries.
+// SearchStats 是 Query 层使用的无包循环全局统计视图，并复制字段长度 map。
 func (i *Index) SearchStats() (uint64, map[string]uint64, error) {
 	stats, err := i.Stats()
 	if err != nil {
@@ -87,6 +95,8 @@ func (i *Index) SearchStats() (uint64, map[string]uint64, error) {
 	return stats.DocumentCount, totals, nil
 }
 
+// TermInfo 返回字段词典统计。不存在的 term 返回零值而不是错误，使普通的
+// “无命中”查询不需要特殊处理 storage.ErrNotFound。
 func (i *Index) TermInfo(field, term string) (inverted.TermInfo, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -98,6 +108,8 @@ func (i *Index) TermInfo(field, term string) (inverted.TermInfo, error) {
 	return info, err
 }
 
+// Postings 通过前缀扫描返回一个 field/term 的全部 posting。固定宽度 DocID key
+// 保证结果按 DocID 升序，可直接用于 Boolean/Phrase merge。
 func (i *Index) Postings(field, term string) ([]inverted.Posting, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -105,6 +117,7 @@ func (i *Index) Postings(field, term string) ([]inverted.Posting, error) {
 	defer iterator.Close()
 	postings := make([]inverted.Posting, 0)
 	for iterator.Next() {
+		// 每条 value 独立校验；任一损坏都会终止查询并返回 codec 错误。
 		posting, err := inverted.DecodePosting(iterator.Value())
 		if err != nil {
 			return nil, err
@@ -114,7 +127,10 @@ func (i *Index) Postings(field, term string) ([]inverted.Posting, error) {
 	return postings, iterator.Error()
 }
 
-// Terms returns all terms in a field matching a raw term prefix.
+// Terms 返回字段中以原始字符串 prefix 开头的全部 term，并按 term 排序。
+//
+// 因 key component 使用 Base64，编码后的字节前缀不等于原 term 前缀，所以需要
+// 扫描整个字段词典、解码后过滤。未来可在该接口后替换为 Trie/FST。
 func (i *Index) Terms(field, prefix string) ([]string, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -134,6 +150,8 @@ func (i *Index) Terms(field, prefix string) ([]string, error) {
 	return terms, iterator.Error()
 }
 
+// AllDocumentIDs 返回全部有效内部 DocID，顺序由固定宽度 docmeta key 保证升序。
+// BooleanQuery 仅含 MustNot 子句时用它构造初始全集。
 func (i *Index) AllDocumentIDs() ([]uint64, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()

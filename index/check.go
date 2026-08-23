@@ -6,7 +6,11 @@ import (
 	"github.com/23jdd/Koris/inverted"
 )
 
-// Check performs a complete index consistency audit without modifying data.
+// Check 执行只读全量一致性审计，不修改任何索引数据。
+//
+// 当前检查两类关键不变量：全局 DocumentCount 与实际 docmeta 数一致；每个
+// TermInfo.DocumentFrequency 与实际 posting 数一致。返回的 Problems 可直接用于
+// 运维诊断；Store/解码错误则通过 error 返回，表示审计本身未能完成。
 func (i *Index) Check() (ConsistencyReport, error) {
 	ids, err := i.AllDocumentIDs()
 	if err != nil {
@@ -23,10 +27,12 @@ func (i *Index) Check() (ConsistencyReport, error) {
 
 	i.mu.RLock()
 	defer i.mu.RUnlock()
+	// term 词典是审计入口：逐 term 扫描对应 posting 前缀并核对 DF。
 	iterator := i.store.Scan(termPrefix)
 	defer iterator.Close()
 	for iterator.Next() {
 		report.Terms++
+		// key 结构和 component 解码也属于一致性检查，不能假设持久化数据可信。
 		parts := splitTermKey(iterator.Key())
 		if len(parts) != 2 {
 			report.Problems = append(report.Problems, "invalid term key: "+string(iterator.Key()))

@@ -8,13 +8,17 @@ import (
 	"github.com/23jdd/Koris/storage"
 )
 
-// Rebuild reconstructs all derived index data from stored documents in one
-// transaction. It is the recovery path for analyzer migrations or a failed
-// consistency audit. Internal document IDs may change.
+// Rebuild 以 document/* 原始文档为唯一事实来源，在一个事务中重建全部派生数据。
+//
+// 适用场景包括 Analyzer 迁移、Check 报告不一致或升级索引 schema。重建会重新
+// 分配内部 DocID，因此外部系统只应持久化 Document.ID；任何文档 JSON 损坏或
+// 写入失败都会让整个事务回滚，旧索引仍保持原状。
 func (i *Index) Rebuild() error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	return i.store.Transaction(func(tx storage.Tx) error {
+		// 必须先把原文完整复制到事务内存，再删除 document 前缀；Iterator 快照
+		// 不应被当作删除后的长期数据源。
 		documents := make([]document.Document, 0)
 		iterator := tx.Scan(docPrefix)
 		for iterator.Next() {
@@ -30,6 +34,7 @@ func (i *Index) Rebuild() error {
 			return err
 		}
 		iterator.Close()
+		// meta/global 最后直接覆盖；其余原文与派生键全部清空后重放 Document。
 		for _, prefix := range [][]byte{docPrefix, docMetaPrefix, idPrefix, postingPrefix, termPrefix} {
 			if err := deletePrefix(tx, prefix); err != nil {
 				return err
@@ -46,6 +51,7 @@ func (i *Index) Rebuild() error {
 }
 
 func deletePrefix(tx storage.Tx, prefix []byte) error {
+	// 先收集 key 再删除，避免不同 Store 对“遍历期间修改”产生不一致行为。
 	iterator := tx.Scan(prefix)
 	keys := make([][]byte, 0)
 	for iterator.Next() {
