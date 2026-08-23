@@ -7,16 +7,21 @@ type skipPoint struct {
 	index int
 }
 
-// SkipListIterator maintains sqrt(N) skip points over a posting list. It is a
-// compact alternative to binary search when postings are streamed from blocks.
+// SkipListIterator 在 posting list 上每隔约 sqrt(N) 个元素建立一个跳点。
+//
+// 与需要随机访问完整切片的二分相比，显式跳点更接近磁盘分块 posting 的访问
+// 模式：先跨块跳跃，再在目标块内顺序扫描。传入 postings 必须已按 DocID 排序。
 type SkipListIterator struct {
 	postings []Posting
 	skips    []skipPoint
 	index    int
 }
 
+// NewSkipListIterator 复制 posting slice 并构建稀疏跳点；position 数据仍按
+// Posting 的只读约定使用。
 func NewSkipListIterator(postings []Posting) *SkipListIterator {
 	iterator := &SkipListIterator{postings: append([]Posting(nil), postings...), index: -1}
+	// sqrt(N) 在跳点空间和块内线性扫描长度之间取得平衡。
 	step := int(math.Sqrt(float64(len(postings))))
 	if step < 2 {
 		step = 2
@@ -46,6 +51,7 @@ func (i *SkipListIterator) Posting() Posting {
 }
 
 func (i *SkipListIterator) SkipTo(target uint64) bool {
+	// 只采用 docID <= target 的最远跳点，避免跨过第一个满足条件的 posting。
 	for _, point := range i.skips {
 		if point.index > i.index && point.docID <= target {
 			i.index = point.index

@@ -5,9 +5,14 @@ import (
 	"errors"
 )
 
+// ErrCorruptPosting 表示二进制 posting 截断、溢出或内部计数不一致。
 var ErrCorruptPosting = errors.New("inverted: corrupt posting")
 
-// EncodePosting uses unsigned varints and delta-encoded positions.
+// EncodePosting 使用 uvarint 编码整数，并对有序 position 做差分编码。
+//
+// 布局为 docID | frequency | positionCount | firstPosition | delta...。
+// 文本中的相邻词位通常产生很小的 delta，绝大多数值只需一个字节。函数返回新
+// 切片，调用方可以直接交给 Store。
 func EncodePosting(posting Posting) []byte {
 	capacity := 20 + len(posting.Positions)*3
 	buffer := make([]byte, 0, capacity)
@@ -16,6 +21,7 @@ func EncodePosting(posting Posting) []byte {
 	buffer = appendUvarint(buffer, uint64(len(posting.Positions)))
 	var previous uint32
 	for i, position := range posting.Positions {
+		// 第一项保存绝对位置，后续保存与前一项的非负差值。
 		delta := position
 		if i > 0 {
 			delta = position - previous
@@ -26,6 +32,8 @@ func EncodePosting(posting Posting) []byte {
 	return buffer
 }
 
+// DecodePosting 解码并严格校验 posting。任何 varint 截断、uint32 溢出、尾随
+// 数据或 frequency/positionCount 不一致都会返回 ErrCorruptPosting。
 func DecodePosting(data []byte) (Posting, error) {
 	var posting Posting
 	var ok bool
@@ -45,6 +53,7 @@ func DecodePosting(data []byte) (Posting, error) {
 	posting.Positions = make([]uint32, 0, count)
 	var previous uint64
 	for i := uint64(0); i < count; i++ {
+		// 使用 uint64 累加后再检查 uint32 上限，避免恶意 delta 在加法时溢出。
 		delta, next, valid := consumeUvarint(rest)
 		if !valid || previous+delta > uint64(^uint32(0)) {
 			return Posting{}, ErrCorruptPosting
@@ -63,6 +72,7 @@ func DecodePosting(data []byte) (Posting, error) {
 }
 
 func appendUvarint(dst []byte, value uint64) []byte {
+	// 栈上 scratch 足以容纳任意 uint64 varint，append 再复制实际使用的字节。
 	var scratch [binary.MaxVarintLen64]byte
 	n := binary.PutUvarint(scratch[:], value)
 	return append(dst, scratch[:n]...)
