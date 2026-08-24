@@ -35,8 +35,8 @@ func (q MatchQuery) Execute(searcher Searcher) ([]Hit, error) {
 		}
 	}
 	// scores 累加相关性；matched 记录每篇文档命中的不同 term 数，供 AND 过滤。
-	scores := make(map[uint64]float64)
-	matched := make(map[uint64]int)
+	scores := make(map[string]float64)
+	matched := make(map[string]int)
 	for _, term := range terms {
 		postings, err := searcher.Postings(q.Field, term)
 		if err != nil {
@@ -59,5 +59,5 @@ func (q MatchQuery) Execute(searcher Searcher) ([]Hit, error) {
 			}
 		}
 	}
-	return hitsFromScores(searcher, scores)
+	return hitsFromScores(scores)
 }

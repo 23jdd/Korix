@@ -15,7 +15,7 @@ type BooleanQuery struct {
 }
 
 func (q BooleanQuery) Execute(searcher Searcher) ([]Hit, error) {
-	var candidates map[uint64]float64
+	var candidates map[string]float64
 	for clauseIndex, clause := range q.Must {
 		hits, err := clause.Execute(searcher)
 		if err != nil {
@@ -41,26 +41,26 @@ func (q BooleanQuery) Execute(searcher Searcher) ([]Hit, error) {
 			return nil, err
 		}
 		if candidates == nil {
-			candidates = make(map[uint64]float64)
+			candidates = make(map[string]float64)
 		}
 		for _, hit := range hits {
 			if len(q.Must) == 0 {
-				candidates[hit.DocID] += hit.Score
-			} else if _, found := candidates[hit.DocID]; found {
-				candidates[hit.DocID] += hit.Score
+				candidates[hit.ID] += hit.Score
+			} else if _, found := candidates[hit.ID]; found {
+				candidates[hit.ID] += hit.Score
 			}
 		}
 	}
 	if candidates == nil {
-		candidates = make(map[uint64]float64)
+		candidates = make(map[string]float64)
 		if len(q.MustNot) > 0 {
 			// 纯否定查询必须先取全集，否则从空集合删除仍然永远为空。
 			ids, err := searcher.AllDocumentIDs()
 			if err != nil {
 				return nil, err
 			}
-			for _, docID := range ids {
-				candidates[docID] = 0
+			for _, id := range ids {
+				candidates[id] = 0
 			}
 		}
 	}
@@ -70,16 +70,16 @@ func (q BooleanQuery) Execute(searcher Searcher) ([]Hit, error) {
 			return nil, err
 		}
 		for _, hit := range hits {
-			delete(candidates, hit.DocID)
+			delete(candidates, hit.ID)
 		}
 	}
-	return hitsFromScores(searcher, candidates)
+	return hitsFromScores(candidates)
 }
 
-func hitScoreMap(hits []Hit) map[uint64]float64 {
-	result := make(map[uint64]float64, len(hits))
+func hitScoreMap(hits []Hit) map[string]float64 {
+	result := make(map[string]float64, len(hits))
 	for _, hit := range hits {
-		result[hit.DocID] = hit.Score
+		result[hit.ID] = hit.Score
 	}
 	return result
 }

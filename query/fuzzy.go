@@ -30,7 +30,7 @@ func (q FuzzyQuery) Execute(searcher Searcher) ([]Hit, error) {
 	if err != nil {
 		return nil, err
 	}
-	scores := make(map[uint64]float64)
+	scores := make(map[string]float64)
 	for _, candidate := range allTerms {
 		distance := levenshtein(term, candidate, maxEdits)
 		if distance > maxEdits {
@@ -49,7 +49,7 @@ func (q FuzzyQuery) Execute(searcher Searcher) ([]Hit, error) {
 			scores[docID] += score * boost
 		}
 	}
-	return hitsFromScores(searcher, scores)
+	return hitsFromScores(scores)
 }
 
 func levenshtein(left, right string, cutoff int) int {

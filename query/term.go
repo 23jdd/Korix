@@ -22,18 +22,18 @@ func (q TermQuery) Execute(searcher Searcher) ([]Hit, error) {
 	if err != nil {
 		return nil, err
 	}
-	hits, err := hitsFromScores(searcher, scores)
+	hits, err := hitsFromScores(scores)
 	if err != nil {
 		return nil, err
 	}
 	// Explanation 需要 TF；排序后的 Hit 已不再直接携带 Posting，所以建立一次
-	// DocID→Frequency 映射补充轻量解释。
-	byID := make(map[uint64]uint32, len(postings))
+	// ID→Frequency 映射补充轻量解释。
+	byID := make(map[string]uint32, len(postings))
 	for _, posting := range postings {
 		byID[posting.DocID] = posting.Frequency
 	}
 	for i := range hits {
-		hits[i].Explanation = explanation(q.Field, q.Term, byID[hits[i].DocID])
+		hits[i].Explanation = explanation(q.Field, q.Term, byID[hits[i].ID])
 	}
 	return hits, nil
 }

@@ -20,14 +20,14 @@ func (q PhraseQuery) Execute(searcher Searcher) ([]Hit, error) {
 	}
 	// 每个 term 建立 DocID→Posting 表，随后以第一个 term 的文档为候选探测其他
 	// term，避免对所有文档做笛卡尔遍历。
-	postingSets := make([]map[uint64]inverted.Posting, len(tokens))
-	termScores := make([]map[uint64]float64, len(tokens))
+	postingSets := make([]map[string]inverted.Posting, len(tokens))
+	termScores := make([]map[string]float64, len(tokens))
 	for i, token := range tokens {
 		postings, err := searcher.Postings(q.Field, token.Term)
 		if err != nil {
 			return nil, err
 		}
-		postingSets[i] = make(map[uint64]inverted.Posting, len(postings))
+		postingSets[i] = make(map[string]inverted.Posting, len(postings))
 		for _, posting := range postings {
 			postingSets[i][posting.DocID] = posting
 		}
@@ -36,7 +36,7 @@ func (q PhraseQuery) Execute(searcher Searcher) ([]Hit, error) {
 			return nil, err
 		}
 	}
-	scores := make(map[uint64]float64)
+	scores := make(map[string]float64)
 	for docID, first := range postingSets[0] {
 		positions := make([][]uint32, len(tokens))
 		positions[0] = first.Positions
@@ -62,7 +62,7 @@ func (q PhraseQuery) Execute(searcher Searcher) ([]Hit, error) {
 			scores[docID] *= 1.5
 		}
 	}
-	return hitsFromScores(searcher, scores)
+	return hitsFromScores(scores)
 }
 
 func phrasePositionsMatch(positions [][]uint32, relative []uint32, slop uint32) bool {

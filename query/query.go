@@ -13,10 +13,9 @@ import (
 )
 
 // Hit 是一条按相关性排序的搜索结果。
-// DocID 是索引内部 ID，ID 是用户文档 ID；Score 越大越相关。Explanation 只包含
-// 轻量解释信息，不承诺作为稳定的机器可解析格式。
+// ID 就是 Document.ID；Koris 不分配第二套内部数字 ID。Score 越大越相关。
+// Explanation 只包含轻量解释信息，不承诺作为稳定的机器可解析格式。
 type Hit struct {
-	DocID       uint64  `json:"doc_id"`
 	ID          string  `json:"id"`
 	Score       float64 `json:"score"`
 	Explanation string  `json:"explanation,omitempty"`
@@ -32,38 +31,33 @@ type Searcher interface {
 	Postings(field, term string) ([]inverted.Posting, error)
 	TermInfo(field, term string) (inverted.TermInfo, error)
 	Terms(field, prefix string) ([]string, error)
-	QueryMetadata(docID uint64) (externalID string, lengths map[string]uint32, err error)
+	QueryMetadata(id string) (lengths map[string]uint32, err error)
 	SearchStats() (documentCount uint64, totalFieldLength map[string]uint64, err error)
-	AllDocumentIDs() ([]uint64, error)
-	Document(docID uint64) (document.Document, error)
+	AllDocumentIDs() ([]string, error)
+	Document(id string) (document.Document, error)
 }
 
 // Query 是所有查询类型的统一协议。Execute 必须返回按 Score 降序排列的 Hit；
-// 相同分数按 DocID 升序，保证重复执行结果稳定。
+// 相同分数按文档 ID 升序，保证重复执行结果稳定。
 type Query interface {
 	Execute(searcher Searcher) ([]Hit, error)
 }
 
 func sortHits(hits []Hit) {
-	// DocID 作为稳定 tie-breaker，避免 Go map 遍历顺序影响最终结果。
+	// 文档 ID 作为稳定 tie-breaker，避免 Go map 遍历顺序影响最终结果。
 	sort.Slice(hits, func(i, j int) bool {
 		if hits[i].Score == hits[j].Score {
-			return hits[i].DocID < hits[j].DocID
+			return hits[i].ID < hits[j].ID
 		}
 		return hits[i].Score > hits[j].Score
 	})
 }
 
-func hitsFromScores(searcher Searcher, scores map[uint64]float64) ([]Hit, error) {
-	// 查询执行期间主要使用紧凑的 docID→score map；只在最终物化 Hit 时读取一次
-	// ExternalID，减少 Boolean 中间结果的数据搬运。
+func hitsFromScores(scores map[string]float64) ([]Hit, error) {
+	// 文档 ID 已经是 scores 的 key，无需再做内部 ID 到外部 ID 的映射。
 	hits := make([]Hit, 0, len(scores))
-	for docID, score := range scores {
-		externalID, _, err := searcher.QueryMetadata(docID)
-		if err != nil {
-			return nil, err
-		}
-		hits = append(hits, Hit{DocID: docID, ID: externalID, Score: score})
+	for id, score := range scores {
+		hits = append(hits, Hit{ID: id, Score: score})
 	}
 	sortHits(hits)
 	return hits, nil

@@ -20,7 +20,7 @@ func (q PrefixQuery) Execute(searcher Searcher) ([]Hit, error) {
 	if err != nil {
 		return nil, err
 	}
-	scores := make(map[uint64]float64)
+	scores := make(map[string]float64)
 	for _, term := range terms {
 		postings, err := searcher.Postings(q.Field, term)
 		if err != nil {
@@ -34,5 +34,5 @@ func (q PrefixQuery) Execute(searcher Searcher) ([]Hit, error) {
 			scores[docID] += score
 		}
 	}
-	return hitsFromScores(searcher, scores)
+	return hitsFromScores(scores)
 }
