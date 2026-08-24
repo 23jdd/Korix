@@ -11,12 +11,12 @@ import (
 	"github.com/23jdd/Koris/storage"
 )
 
-// Add 写入一篇文档；外部 ID 已存在时原子替换旧文档。
-// 返回的内部 DocID 在更新时保持不变，便于调用者缓存搜索结果引用。
-func (i *Index) Add(doc document.Document) (uint64, error) {
+// Add 写入一篇文档；ID 已存在时原子替换旧文档。返回值就是 doc.ID，Koris
+// 不会额外分配内部数字 ID。
+func (i *Index) Add(doc document.Document) (string, error) {
 	ids, err := i.AddBatch([]document.Document{doc})
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 	return ids[0], nil
 }
@@ -25,7 +25,7 @@ func (i *Index) Add(doc document.Document) (uint64, error) {
 //
 // 任一文档无效、Analyzer/编码失败或 Store 写入失败，都会回滚批次内已完成的所有
 // 文档以及全局统计。返回 ID 的顺序与输入文档顺序一致。空批次是成功的空操作。
-func (i *Index) AddBatch(documents []document.Document) ([]uint64, error) {
+func (i *Index) AddBatch(documents []document.Document) ([]string, error) {
 	if len(documents) == 0 {
 		return nil, nil
 	}
@@ -37,7 +37,7 @@ func (i *Index) AddBatch(documents []document.Document) ([]uint64, error) {
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	ids := make([]uint64, len(documents))
+	ids := make([]string, len(documents))
 	err := i.store.Transaction(func(tx storage.Tx) error {
 		// global 只在本地副本上累计，全部文档完成后才写回同一事务。
 		var global GlobalStats
@@ -46,44 +46,34 @@ func (i *Index) AddBatch(documents []document.Document) ([]uint64, error) {
 		}
 		ensureGlobalMaps(&global)
 		for n, doc := range documents {
-			docID, err := i.addInTransaction(tx, &global, doc)
+			id, err := i.addInTransaction(tx, &global, doc)
 			if err != nil {
 				return err
 			}
-			ids[n] = docID
+			ids[n] = id
 		}
 		return putJSON(tx, globalMetaKey, global)
 	})
 	return ids, err
 }
 
-func (i *Index) addInTransaction(tx storage.Tx, global *GlobalStats, doc document.Document) (uint64, error) {
-	docID, exists, err := lookupExternalID(tx, doc.ID)
-	if err != nil {
-		return 0, err
-	}
-	if exists {
+func (i *Index) addInTransaction(tx storage.Tx, global *GlobalStats, doc document.Document) (string, error) {
+	var old storedDocumentMetadata
+	err := getJSON(tx, documentMetaKey(doc.ID), &old)
+	if err == nil {
 		// 更新必须先基于“旧 term vector”撤销派生数据，不能用当前 Analyzer 重新
 		// 分析旧原文，否则 Analyzer 迁移后会删错 term。
-		var old storedDocumentMetadata
-		if err := getJSON(tx, documentMetaKey(docID), &old); err != nil {
-			return 0, err
-		}
 		if err := removeVectors(tx, &old, global); err != nil {
-			return 0, err
+			return "", err
 		}
-	} else {
-		// DocID 单调分配且不回收，避免删除后的 ID 被新文档复用造成悬空引用误命中。
-		docID = global.NextDocumentID
-		if docID == 0 {
-			docID = 1
-		}
-		global.NextDocumentID = docID + 1
+	} else if errors.Is(err, storage.ErrNotFound) {
 		global.DocumentCount++
+	} else {
+		return "", err
 	}
 
 	metadata := storedDocumentMetadata{
-		DocumentMetadata: DocumentMetadata{DocID: docID, ExternalID: doc.ID, Lengths: make(map[string]uint32)},
+		DocumentMetadata: DocumentMetadata{ID: doc.ID, Lengths: make(map[string]uint32)},
 		TermVectors:      make(map[string]map[string][]uint32),
 	}
 	// map 迭代无序；排序字段让写入顺序、测试结果和 Bbolt 页面变化尽量稳定。
@@ -103,57 +93,49 @@ func (i *Index) addInTransaction(tx storage.Tx, global *GlobalStats, doc documen
 		for term, positions := range vectors {
 			// Posting 与 TermInfo 必须在同一事务更新，保证 Reader 永远不会看到
 			// 已增加 DF 但缺失 posting（或反之）的中间状态。
-			posting := inverted.NewPosting(docID, positions)
-			if err := tx.Put(postingKey(field, term, docID), inverted.EncodePosting(posting)); err != nil {
-				return 0, err
+			posting := inverted.NewPosting(doc.ID, positions)
+			if err := tx.Put(postingKey(field, term, doc.ID), inverted.EncodePosting(posting)); err != nil {
+				return "", err
 			}
 			var info inverted.TermInfo
 			err := getJSON(tx, termKey(field, term), &info)
 			if err != nil && !errors.Is(err, storage.ErrNotFound) {
-				return 0, err
+				return "", err
 			}
 			info.DocumentFrequency++
 			info.TotalFrequency += uint64(len(positions))
 			if err := putJSON(tx, termKey(field, term), info); err != nil {
-				return 0, err
+				return "", err
 			}
 		}
 	}
-	// 原始 Document 是 Rebuild 的事实来源；docmeta 与 id 映射均属于可重建/辅助数据。
-	if err := putJSON(tx, documentKey(docID), doc.Clone()); err != nil {
-		return 0, err
+	// 原始 Document 是 Rebuild 的事实来源；docmeta 属于可重建的辅助数据。
+	if err := putJSON(tx, documentKey(doc.ID), doc.Clone()); err != nil {
+		return "", err
 	}
-	if err := putJSON(tx, documentMetaKey(docID), metadata); err != nil {
-		return 0, err
+	if err := putJSON(tx, documentMetaKey(doc.ID), metadata); err != nil {
+		return "", err
 	}
-	if err := tx.Put(externalIDKey(doc.ID), encodeUint64(docID)); err != nil {
-		return 0, err
-	}
-	return docID, nil
+	return doc.ID, nil
 }
 
-// Delete 按外部 ID 原子删除原文、映射、metadata、全部 posting 与相关统计。
-// DocID 不会放回分配池；不存在的 ID 返回 ErrDocumentMissing。
-func (i *Index) Delete(externalID string) error {
-	if strings.TrimSpace(externalID) == "" {
+// Delete 按字符串 ID 原子删除原文、metadata、全部 posting 与相关统计。
+// 不存在的 ID 返回 ErrDocumentMissing。
+func (i *Index) Delete(id string) error {
+	if strings.TrimSpace(id) == "" {
 		return ErrInvalidDocument
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	return i.store.Transaction(func(tx storage.Tx) error {
-		docID, exists, err := lookupExternalID(tx, externalID)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			return ErrDocumentMissing
-		}
 		var global GlobalStats
 		if err := getJSON(tx, globalMetaKey, &global); err != nil {
 			return err
 		}
 		var metadata storedDocumentMetadata
-		if err := getJSON(tx, documentMetaKey(docID), &metadata); err != nil {
+		if err := getJSON(tx, documentMetaKey(id), &metadata); errors.Is(err, storage.ErrNotFound) {
+			return ErrDocumentMissing
+		} else if err != nil {
 			return err
 		}
 		if err := removeVectors(tx, &metadata, &global); err != nil {
@@ -162,13 +144,10 @@ func (i *Index) Delete(externalID string) error {
 		if global.DocumentCount > 0 {
 			global.DocumentCount--
 		}
-		if err := tx.Delete(documentKey(docID)); err != nil {
+		if err := tx.Delete(documentKey(id)); err != nil {
 			return err
 		}
-		if err := tx.Delete(documentMetaKey(docID)); err != nil {
-			return err
-		}
-		if err := tx.Delete(externalIDKey(externalID)); err != nil {
+		if err := tx.Delete(documentMetaKey(id)); err != nil {
 			return err
 		}
 		return putJSON(tx, globalMetaKey, global)
@@ -186,7 +165,7 @@ func removeVectors(tx storage.Tx, metadata *storedDocumentMetadata, global *Glob
 			global.TotalFieldLength[field] = 0
 		}
 		for term, positions := range terms {
-			if err := tx.Delete(postingKey(field, term, metadata.DocID)); err != nil {
+			if err := tx.Delete(postingKey(field, term, metadata.ID)); err != nil {
 				return err
 			}
 			var info inverted.TermInfo
@@ -225,27 +204,11 @@ func validateDocument(doc document.Document) error {
 	return nil
 }
 
-func lookupExternalID(reader storage.Reader, externalID string) (uint64, bool, error) {
-	// “未找到”是正常分支，通过 found=false 返回；其他 Store 错误必须向上传播。
-	data, err := reader.Get(externalIDKey(externalID))
-	if errors.Is(err, storage.ErrNotFound) {
-		return 0, false, nil
-	}
-	if err != nil {
-		return 0, false, err
-	}
-	docID, err := decodeUint64(data)
-	return docID, true, err
-}
-
 func ensureGlobalMaps(global *GlobalStats) {
-	// 兼容早期或手工构造的 metadata：nil map 不能直接累加，next=0 也不是合法
-	// 分配值，因此在每个写事务开始时补齐默认值。
+	// 兼容早期或手工构造的 metadata：nil map 不能直接累加，因此在每个写事务
+	// 开始时补齐默认值。
 	if global.TotalFieldLength == nil {
 		global.TotalFieldLength = make(map[string]uint64)
-	}
-	if global.NextDocumentID == 0 {
-		global.NextDocumentID = 1
 	}
 }
 

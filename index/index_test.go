@@ -55,6 +55,34 @@ func TestAddLookupAndStats(t *testing.T) {
 	}
 }
 
+func TestStringIDIsUsedEndToEnd(t *testing.T) {
+	idx := newTestIndex(t)
+	id := "tenant/用户:42"
+	addedID, err := idx.Add(document.Document{ID: id, Fields: map[string]string{"content": "string identifier"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if addedID != id {
+		t.Fatalf("Add returned %q, want %q", addedID, id)
+	}
+	metadata, err := idx.Metadata(id)
+	if err != nil || metadata.ID != id {
+		t.Fatalf("metadata=%#v err=%v", metadata, err)
+	}
+	postings, err := idx.Postings("content", "identifier")
+	if err != nil || len(postings) != 1 || postings[0].DocID != id {
+		t.Fatalf("postings=%#v err=%v", postings, err)
+	}
+	hits, err := idx.Search(query.TermQuery{Field: "content", Term: "identifier"}, 0)
+	if err != nil || len(hits) != 1 || hits[0].ID != id {
+		t.Fatalf("hits=%#v err=%v", hits, err)
+	}
+	ids, err := idx.AllDocumentIDs()
+	if err != nil || len(ids) != 1 || ids[0] != id {
+		t.Fatalf("ids=%#v err=%v", ids, err)
+	}
+}
+
 func TestUpdateReplacesPostingsAndStats(t *testing.T) {
 	idx := newTestIndex(t)
 	firstID, _ := idx.Add(document.Document{ID: "1", Fields: map[string]string{"content": "old old term"}})
@@ -63,7 +91,7 @@ func TestUpdateReplacesPostingsAndStats(t *testing.T) {
 		t.Fatal(err)
 	}
 	if firstID != secondID {
-		t.Fatalf("update changed internal ID %d -> %d", firstID, secondID)
+		t.Fatalf("update changed document ID %q -> %q", firstID, secondID)
 	}
 	oldPostings, _ := idx.Postings("content", "old")
 	newPostings, _ := idx.Postings("content", "new")

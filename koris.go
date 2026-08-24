@@ -34,6 +34,6 @@ func Open(path string, options ...indexpkg.Option) (*indexpkg.Index, error) {
 
 // Add 是构造 Document 并调用 Index.Add 的便捷函数；复杂场景可直接使用
 // idx.Add/idx.AddBatch 以获得更明确的数据模型。
-func Add(idx *indexpkg.Index, id string, fields map[string]string) (uint64, error) {
+func Add(idx *indexpkg.Index, id string, fields map[string]string) (string, error) {
 	return idx.Add(document.Document{ID: id, Fields: fields})
 }

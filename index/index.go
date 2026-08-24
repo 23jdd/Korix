@@ -73,7 +73,7 @@ func (i *Index) initialize() error {
 		} else if err != storage.ErrNotFound {
 			return err
 		}
-		return putJSON(tx, globalMetaKey, GlobalStats{TotalFieldLength: make(map[string]uint64), NextDocumentID: 1})
+		return putJSON(tx, globalMetaKey, GlobalStats{TotalFieldLength: make(map[string]uint64)})
 	})
 }
 

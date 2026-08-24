@@ -21,7 +21,7 @@ func BenchmarkStandardAnalyzer(b *testing.B) {
 }
 
 func BenchmarkPostingCodec(b *testing.B) {
-	posting := inverted.NewPosting(123456, []uint32{1, 4, 9, 15, 30, 100})
+	posting := inverted.NewPosting("doc-123456", []uint32{1, 4, 9, 15, 30, 100})
 	b.ReportAllocs()
 	for b.Loop() {
 		encoded := inverted.EncodePosting(posting)

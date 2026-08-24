@@ -24,7 +24,7 @@ func (i *Index) Facet(q query.Query, field string, limit int) ([]FacetBucket, er
 	}
 	counts := make(map[string]uint64)
 	for _, hit := range hits {
-		doc, err := i.Document(hit.DocID)
+		doc, err := i.Document(hit.ID)
 		if err != nil {
 			return nil, err
 		}

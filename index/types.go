@@ -8,9 +8,9 @@ import (
 )
 
 var (
-	// ErrInvalidDocument 表示外部 ID 为空、字段集合为空或字段名为空。
+	// ErrInvalidDocument 表示字符串 ID 为空、字段集合为空或字段名为空。
 	ErrInvalidDocument = errors.New("index: document ID and fields are required")
-	// ErrDocumentMissing 表示按内部或外部 ID 查找不到有效文档。
+	// ErrDocumentMissing 表示按字符串 ID 查找不到有效文档。
 	ErrDocumentMissing = errors.New("index: document not found")
 	// ErrCorruptIndex 表示持久化 JSON 或 schema 内容无法解码。
 	ErrCorruptIndex = errors.New("index: corrupt stored value")
@@ -20,18 +20,16 @@ var (
 // Lengths 保存每个字段经过 Analyzer 后的 token 数，供 BM25 计算 DL。持久化内部
 // 结构还包含 term vector，但不公开它，防止调用者依赖更新实现细节。
 type DocumentMetadata struct {
-	DocID      uint64            `json:"doc_id"`
-	ExternalID string            `json:"external_id"`
-	Lengths    map[string]uint32 `json:"lengths"`
+	ID      string            `json:"id"`
+	Lengths map[string]uint32 `json:"lengths"`
 }
 
 // GlobalStats 保存整个索引的聚合统计。
 // TotalFieldLength 是每个字段在所有文档中的 token 总数；除以 DocumentCount 得到
-// BM25 avgDL。NextDocumentID 单调递增，删除文档不会回收旧 ID。
+// BM25 avgDL。文档 ID 直接来自 Document.ID，因此不维护数字 ID 分配器。
 type GlobalStats struct {
 	DocumentCount    uint64            `json:"document_count"`
 	TotalFieldLength map[string]uint64 `json:"total_field_length"`
-	NextDocumentID   uint64            `json:"next_document_id"`
 }
 
 type storedDocumentMetadata struct {

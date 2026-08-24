@@ -10,13 +10,13 @@ import (
 	"github.com/23jdd/Koris/storage"
 )
 
-// Document 按内部 DocID 返回原始文档副本。Store 的 NotFound 被转换成稳定的
+// Document 按字符串 ID 返回原始文档副本。Store 的 NotFound 被转换成稳定的
 // ErrDocumentMissing，调用方无需依赖后端错误。
-func (i *Index) Document(docID uint64) (document.Document, error) {
+func (i *Index) Document(id string) (document.Document, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 	var doc document.Document
-	if err := getJSON(i.store, documentKey(docID), &doc); err != nil {
+	if err := getJSON(i.store, documentKey(id), &doc); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			return document.Document{}, ErrDocumentMissing
 		}
@@ -25,31 +25,18 @@ func (i *Index) Document(docID uint64) (document.Document, error) {
 	return doc.Clone(), nil
 }
 
-// DocumentByID 先解析外部字符串 ID，再读取原始文档。返回深拷贝，调用方修改
-// Fields 不会改变索引内容。
-func (i *Index) DocumentByID(externalID string) (document.Document, error) {
-	i.mu.RLock()
-	defer i.mu.RUnlock()
-	docID, found, err := lookupExternalID(i.store, externalID)
-	if err != nil {
-		return document.Document{}, err
-	}
-	if !found {
-		return document.Document{}, ErrDocumentMissing
-	}
-	var doc document.Document
-	if err := getJSON(i.store, documentKey(docID), &doc); err != nil {
-		return document.Document{}, err
-	}
-	return doc.Clone(), nil
+// DocumentByID 是 Document 的语义化别名。Koris 只有一套字符串文档 ID，
+// 不再执行内部 ID 与外部 ID 的转换。
+func (i *Index) DocumentByID(id string) (document.Document, error) {
+	return i.Document(id)
 }
 
 // Metadata 返回 BM25 所需的公开文档统计，不暴露内部 term vector。
-func (i *Index) Metadata(docID uint64) (DocumentMetadata, error) {
+func (i *Index) Metadata(id string) (DocumentMetadata, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 	var metadata storedDocumentMetadata
-	if err := getJSON(i.store, documentMetaKey(docID), &metadata); err != nil {
+	if err := getJSON(i.store, documentMetaKey(id), &metadata); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			return DocumentMetadata{}, ErrDocumentMissing
 		}
@@ -58,8 +45,8 @@ func (i *Index) Metadata(docID uint64) (DocumentMetadata, error) {
 	return metadata.DocumentMetadata, nil
 }
 
-// Stats 返回文档总数、字段总长度和下一 DocID。值由 JSON 解码得到，map 不与
-// Store 内存共享，调用方可安全读取或复制。
+// Stats 返回文档总数和字段总长度。值由 JSON 解码得到，map 不与 Store 内存
+// 共享，调用方可安全读取或复制。
 func (i *Index) Stats() (GlobalStats, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -70,16 +57,16 @@ func (i *Index) Stats() (GlobalStats, error) {
 
 // QueryMetadata 是 Query 层使用的无包循环 metadata 视图。它复制 Lengths map，
 // 防止查询实现意外修改 Index 返回的统计。
-func (i *Index) QueryMetadata(docID uint64) (string, map[string]uint32, error) {
-	metadata, err := i.Metadata(docID)
+func (i *Index) QueryMetadata(id string) (map[string]uint32, error) {
+	metadata, err := i.Metadata(id)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	lengths := make(map[string]uint32, len(metadata.Lengths))
 	for field, length := range metadata.Lengths {
 		lengths[field] = length
 	}
-	return metadata.ExternalID, lengths, nil
+	return lengths, nil
 }
 
 // SearchStats 是 Query 层使用的无包循环全局统计视图，并复制字段长度 map。
@@ -108,8 +95,8 @@ func (i *Index) TermInfo(field, term string) (inverted.TermInfo, error) {
 	return info, err
 }
 
-// Postings 通过前缀扫描返回一个 field/term 的全部 posting。固定宽度 DocID key
-// 保证结果按 DocID 升序，可直接用于 Boolean/Phrase merge。
+// Postings 通过前缀扫描返回一个 field/term 的全部 posting，并按字符串 ID 排序，
+// 可直接用于 Boolean/Phrase merge。
 func (i *Index) Postings(field, term string) ([]inverted.Posting, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -124,6 +111,7 @@ func (i *Index) Postings(field, term string) ([]inverted.Posting, error) {
 		}
 		postings = append(postings, posting)
 	}
+	sort.Slice(postings, func(a, b int) bool { return postings[a].DocID < postings[b].DocID })
 	return postings, iterator.Error()
 }
 
@@ -150,20 +138,21 @@ func (i *Index) Terms(field, prefix string) ([]string, error) {
 	return terms, iterator.Error()
 }
 
-// AllDocumentIDs 返回全部有效内部 DocID，顺序由固定宽度 docmeta key 保证升序。
+// AllDocumentIDs 返回全部有效字符串 ID，并按原始字符串升序排列。
 // BooleanQuery 仅含 MustNot 子句时用它构造初始全集。
-func (i *Index) AllDocumentIDs() ([]uint64, error) {
+func (i *Index) AllDocumentIDs() ([]string, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 	iterator := i.store.Scan(docMetaPrefix)
 	defer iterator.Close()
-	ids := make([]uint64, 0)
+	ids := make([]string, 0)
 	for iterator.Next() {
-		docID, err := parseDocIDPart(lastKeyComponent(iterator.Key()))
+		id, err := decodeComponent(lastKeyComponent(iterator.Key()))
 		if err != nil {
 			return nil, err
 		}
-		ids = append(ids, docID)
+		ids = append(ids, id)
 	}
+	sort.Strings(ids)
 	return ids, iterator.Error()
 }

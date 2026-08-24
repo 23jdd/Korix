@@ -105,7 +105,7 @@ func scanMap(data map[string][]byte, prefix []byte) Iterator {
 		}
 	}
 	// Go map 无迭代顺序；显式排序使 Memory 与 Bbolt 的 Scan 行为完全一致，
-	// posting 合并也可依赖 DocID key 的有序性。
+	// posting 合并也可依赖 key 的稳定字典序。
 	sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].key, entries[j].key) < 0 })
 	return newSliceIterator(entries)
 }
