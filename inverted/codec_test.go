@@ -1,6 +1,7 @@
 package inverted_test
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -8,7 +9,7 @@ import (
 )
 
 func TestPostingCodecRoundTrip(t *testing.T) {
-	want := inverted.NewPosting(42, []uint32{1000, 1, 8, 9})
+	want := inverted.NewPosting("doc-42", []uint32{1000, 1, 8, 9})
 	encoded := inverted.EncodePosting(want)
 	got, err := inverted.DecodePosting(encoded)
 	if err != nil {
@@ -29,11 +30,11 @@ func TestPostingCodecRejectsCorruption(t *testing.T) {
 }
 
 func TestPostingIteratorSkipTo(t *testing.T) {
-	iterator := inverted.NewPostingIterator([]inverted.Posting{{DocID: 9}, {DocID: 1}, {DocID: 5}})
-	if !iterator.SkipTo(5) || iterator.Posting().DocID != 5 {
+	iterator := inverted.NewPostingIterator([]inverted.Posting{{DocID: "doc-9"}, {DocID: "doc-1"}, {DocID: "doc-5"}})
+	if !iterator.SkipTo("doc-5") || iterator.Posting().DocID != "doc-5" {
 		t.Fatalf("SkipTo = %#v", iterator.Posting())
 	}
-	if !iterator.Next() || iterator.Posting().DocID != 9 {
+	if !iterator.Next() || iterator.Posting().DocID != "doc-9" {
 		t.Fatal("Next after SkipTo failed")
 	}
 }
@@ -41,10 +42,10 @@ func TestPostingIteratorSkipTo(t *testing.T) {
 func TestSkipListIterator(t *testing.T) {
 	postings := make([]inverted.Posting, 100)
 	for i := range postings {
-		postings[i].DocID = uint64(i * 2)
+		postings[i].DocID = fmt.Sprintf("%03d", i*2)
 	}
 	iterator := inverted.NewSkipListIterator(postings)
-	if !iterator.SkipTo(73) || iterator.Posting().DocID != 74 {
+	if !iterator.SkipTo("073") || iterator.Posting().DocID != "074" {
 		t.Fatalf("SkipTo(73) = %#v", iterator.Posting())
 	}
 }

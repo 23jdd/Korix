@@ -35,7 +35,7 @@ func (i *PostingIterator) Posting() Posting {
 	return i.postings[i.index]
 }
 
-func (i *PostingIterator) SkipTo(docID uint64) bool {
+func (i *PostingIterator) SkipTo(docID string) bool {
 	// 只在当前游标之后查找，保证 Iterator 单调向前，绝不重新返回旧 DocID。
 	start := i.index
 	if start < 0 {

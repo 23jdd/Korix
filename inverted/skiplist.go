@@ -3,7 +3,7 @@ package inverted
 import "math"
 
 type skipPoint struct {
-	docID uint64
+	docID string
 	index int
 }
 
@@ -50,7 +50,7 @@ func (i *SkipListIterator) Posting() Posting {
 	return i.postings[i.index]
 }
 
-func (i *SkipListIterator) SkipTo(target uint64) bool {
+func (i *SkipListIterator) SkipTo(target string) bool {
 	// 只采用 docID <= target 的最远跳点，避免跨过第一个满足条件的 posting。
 	for _, point := range i.skips {
 		if point.index > i.index && point.docID <= target {

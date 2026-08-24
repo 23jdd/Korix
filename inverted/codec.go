@@ -10,13 +10,14 @@ var ErrCorruptPosting = errors.New("inverted: corrupt posting")
 
 // EncodePosting 使用 uvarint 编码整数，并对有序 position 做差分编码。
 //
-// 布局为 docID | frequency | positionCount | firstPosition | delta...。
-// 文本中的相邻词位通常产生很小的 delta，绝大多数值只需一个字节。函数返回新
-// 切片，调用方可以直接交给 Store。
+// 布局为 docIDByteLength | docIDBytes | frequency | positionCount |
+// firstPosition | delta...。ID 长度及数值字段使用 uvarint；文本中的相邻词位
+// 通常产生很小的 delta。函数返回新切片，调用方可以直接交给 Store。
 func EncodePosting(posting Posting) []byte {
-	capacity := 20 + len(posting.Positions)*3
+	capacity := 20 + len(posting.DocID) + len(posting.Positions)*3
 	buffer := make([]byte, 0, capacity)
-	buffer = appendUvarint(buffer, posting.DocID)
+	buffer = appendUvarint(buffer, uint64(len(posting.DocID)))
+	buffer = append(buffer, posting.DocID...)
 	buffer = appendUvarint(buffer, uint64(posting.Frequency))
 	buffer = appendUvarint(buffer, uint64(len(posting.Positions)))
 	var previous uint32
@@ -37,10 +38,12 @@ func EncodePosting(posting Posting) []byte {
 func DecodePosting(data []byte) (Posting, error) {
 	var posting Posting
 	var ok bool
-	posting.DocID, data, ok = consumeUvarint(data)
-	if !ok {
+	idLength, rest, ok := consumeUvarint(data)
+	if !ok || idLength > uint64(len(rest)) {
 		return Posting{}, ErrCorruptPosting
 	}
+	posting.DocID = string(rest[:idLength])
+	data = rest[idLength:]
 	frequency, rest, ok := consumeUvarint(data)
 	if !ok || frequency > uint64(^uint32(0)) {
 		return Posting{}, ErrCorruptPosting

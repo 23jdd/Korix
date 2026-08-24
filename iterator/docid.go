@@ -7,19 +7,19 @@ import "sort"
 // 返回 false 表示到达末尾。
 type DocIDIterator interface {
 	Next() bool
-	DocID() uint64
-	SkipTo(target uint64) bool
+	DocID() string
+	SkipTo(target string) bool
 }
 
 // Slice 是基于内存切片的 DocIDIterator 实现。
 type Slice struct {
-	ids   []uint64
+	ids   []string
 	index int
 }
 
 // New 复制并排序输入 ID，调用方随后修改原切片不会影响迭代器。
-func New(ids []uint64) *Slice {
-	copyIDs := append([]uint64(nil), ids...)
+func New(ids []string) *Slice {
+	copyIDs := append([]string(nil), ids...)
 	sort.Slice(copyIDs, func(i, j int) bool { return copyIDs[i] < copyIDs[j] })
 	return &Slice{ids: copyIDs, index: -1}
 }
@@ -33,14 +33,14 @@ func (i *Slice) Next() bool {
 	return true
 }
 
-func (i *Slice) DocID() uint64 {
+func (i *Slice) DocID() string {
 	if i.index < 0 || i.index >= len(i.ids) {
-		return 0
+		return ""
 	}
 	return i.ids[i.index]
 }
 
-func (i *Slice) SkipTo(target uint64) bool {
+func (i *Slice) SkipTo(target string) bool {
 	// 从当前游标起二分查找，保持严格单调遍历。
 	start := i.index
 	if start < 0 {
