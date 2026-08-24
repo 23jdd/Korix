@@ -2,6 +2,10 @@
 
 [中文](design-decisions.md) | English
 
+## Why Use String IDs End to End?
+
+`Document.ID` is already the caller-defined unique identifier, so Koris uses it directly in document keys, metadata, postings, hits, and every API. This removes the need for a `string ↔ uint64` mapping, a numeric allocator, or two separate ID lifecycles. Field, term, and ID key components use URL-safe Base64, so strings containing slashes, Unicode text, or URLs remain safe. Postings are slightly larger than they would be with numeric IDs, but the API and debugging model are substantially simpler.
+
 ## Why Use a Store Interface?
 
 The index layer only depends on `Get`, `Put`, `Delete`, `Scan`, and `Transaction`. Tests can therefore use a zero-configuration MemoryStore, production can use Bbolt, and future implementations can target Pebble, Badger, or a remote transactional key-value store without changing analyzers or queries. Scan returns a snapshot iterator so the lifetime of an underlying transaction never leaks to the caller.

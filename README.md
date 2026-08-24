@@ -6,7 +6,7 @@ Koris is a lightweight embedded full-text search engine implemented from scratch
 
 ## Features
 
-- Document and field-level search with user-defined string IDs and stable internal `uint64` document IDs
+- Document and field-level search using `Document.ID` strings end to end—no internal numeric document IDs
 - Unicode-aware Standard, Whitespace, and Simple tokenizers
 - Trie-based Chinese dictionaries, forward/reverse/bidirectional maximum matching, and BMES-HMM Viterbi segmentation
 - Lowercase, stop-word, and English stemming filters, plus reusable token streams
@@ -16,6 +16,8 @@ Koris is a lightweight embedded full-text search engine implemented from scratch
 - Highlighting, low-cardinality field facets, and posting skip iterators
 - MemoryStore and BboltStore with atomic batches, rollback, update, delete, and rebuild support
 - Concurrent-safe reads and writes, consistency checks, unit tests, race tests, and benchmarks
+
+`Document.ID` is the engine's only document identifier. The same string is stored in postings, returned in `Hit.ID`, accepted by Document/Delete/Highlight, and returned by Add/AddBatch.
 
 ## Quick Start
 

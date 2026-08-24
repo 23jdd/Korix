@@ -3,7 +3,7 @@
 Koris 是一个使用 Go 从零实现的轻量级嵌入式全文搜索引擎
 ## 功能
 
-- 文档与字段级检索，用户字符串 ID + 稳定内部 `uint64` DocID
+- 文档与字段级检索，全链路直接使用 `Document.ID` 字符串，不分配内部数字 ID
 - Unicode Standard / Whitespace / Simple tokenizer
 - Trie 中文词典、正向/逆向/双向最大匹配、BMES-HMM Viterbi 分词
 - Lowercase、StopWord、英文词干过滤器和可复用 TokenStream
@@ -13,6 +13,8 @@ Koris 是一个使用 Go 从零实现的轻量级嵌入式全文搜索引擎
 - 高亮、低基数字段分面、posting 跳表迭代
 - MemoryStore 和 BboltStore，原子批量写入、回滚、更新、删除与重建
 - 并发安全读写、完整性检查、单元测试和 Benchmark
+
+`Document.ID` 是引擎唯一的文档标识：同一个字符串会写入 posting、通过 `Hit.ID` 返回，并直接用于 Document/Delete/Highlight；Add/AddBatch 也返回字符串 ID。
 
 ## 快速开始
 

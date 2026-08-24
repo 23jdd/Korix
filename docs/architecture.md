@@ -39,7 +39,7 @@ type Document struct {
 }
 ```
 
-ID 在索引内唯一。首次写入分配单调递增内部 DocID；同 ID 再次 Add 是原子 Update，并保留内部 DocID。字段分别分析、统计与检索，因此同一个 term 在 title 和 content 中拥有不同词典项和 posting。
+ID 在索引内唯一，并在文档、metadata、posting、Hit 和所有 API 中直接使用同一个字符串，不存在内部数字 DocID。同 ID 再次 Add 是原子 Update。字段分别分析、统计与检索，因此同一个 term 在 title 和 content 中拥有不同词典项和 posting。
 
 ## 分析层
 
@@ -65,14 +65,14 @@ Token 的 offset 是 UTF-8 字节偏移，可直接、安全地切片原字符�
 
 Add/Update 的事务内步骤：
 
-1. 通过外部 ID 查找内部 DocID；
+1. 用 `Document.ID` 定位文档 metadata；
 2. 若为更新，根据持久化 term vector 删除旧 posting 并回退 DF/TF/文档长度；
 3. 保存文档；
 4. 对每个字段运行 analyzer，按 term 聚合 position；
-5. 写入压缩 posting；
+5. 写入带字符串 ID 的压缩 posting；
 6. 更新 TermInfo（DF、总 TF）；
 7. 写入文档 metadata 与 term vector；
-8. 更新文档数、各字段总长度和 next DocID；
+8. 更新文档数和各字段总长度；
 9. 一次提交。
 
 持久化 term vector 是更新正确性的关键：即使进程重启后 analyzer 配置改变，也能精确删除旧索引数据，而不必用新 analyzer 猜测旧 token。
@@ -81,7 +81,7 @@ AddBatch 在一个事务里执行上述流程，任一文档失败则整个批�
 
 ## 读取与查询
 
-Term Query 前缀扫描 term 的 posting key，posting 天然按固定宽度 DocID 排序。Match Query 先分析文本，再按 AND/OR 合并 term 得分。Boolean Query 组合任意子查询；Phrase Query 对公共 DocID 检查有序 position；Prefix/Fuzzy Query先扩展词典，再执行 term scoring。
+Term Query 前缀扫描 term 的 posting key，并按字符串 ID 排序 posting。Match Query 先分析文本，再按 AND/OR 合并 term 得分。Boolean Query 组合任意子查询；Phrase Query 对相同文档 ID 检查有序 position；Prefix/Fuzzy Query 先扩展词典，再执行 term scoring。
 
 查询字符串 parser 的优先级为 `NOT > AND > OR`，相邻 clause 隐式 OR。支持括号、`field:value`、`"phrase"` 与尾部 `*`。
 
@@ -107,7 +107,7 @@ Index 用 RWMutex 保护管理操作，Store 自身也支持并发。一次 Stor
 
 ## 恢复与审计
 
-`Check` 比较全局文档数、term DF 和实际 posting 数。`Rebuild` 仅以 `document/*` 原始文档为事实来源，删除所有派生键后用当前 analyzer 原子重建。若原始文档自身损坏，Rebuild 会失败并回滚。
+`Check` 比较全局文档数、term DF 和实际 posting 数。`Rebuild` 仅以 `document/*` 原始文档为事实来源，删除所有派生键后用当前 analyzer 原子重建，并始终保留原字符串 ID。它也会清理旧版 `id/*` 映射，可用于把早期数字 ID schema 迁移为字符串 ID schema。若原始文档自身损坏，Rebuild 会失败并回滚。
 
 ## 高级能力
 

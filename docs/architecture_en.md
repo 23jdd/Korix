@@ -41,7 +41,7 @@ type Document struct {
 }
 ```
 
-An ID must be unique within an index. The first write allocates a monotonically increasing internal document ID. Adding the same external ID again performs an atomic update while preserving that internal ID. Fields are analyzed, counted, and queried independently, so the same term in `title` and `content` has separate dictionary entries and postings.
+An ID must be unique within an index. The same string is used directly by documents, metadata, postings, hits, and every API; there is no internal numeric document ID. Adding the same ID again performs an atomic update. Fields are analyzed, counted, and queried independently, so the same term in `title` and `content` has separate dictionary entries and postings.
 
 ## Analysis Layer
 
@@ -67,14 +67,14 @@ Built-in tokenizers include:
 
 Add and Update perform the following steps inside one transaction:
 
-1. Resolve the internal document ID from the external ID;
+1. Locate document metadata directly with `Document.ID`;
 2. For an update, use the persisted term vector to delete old postings and reverse DF, TF, and document-length statistics;
 3. Store the document;
 4. Run the analyzer for each field and group positions by term;
-5. Write compressed postings;
+5. Write compressed postings containing the string ID;
 6. Update `TermInfo`, including document frequency and total term frequency;
 7. Write document metadata and the term vector;
-8. Update the document count, total field lengths, and next document ID;
+8. Update the document count and total field lengths;
 9. Commit once.
 
 Persisting term vectors is essential for correct updates. Even if the analyzer configuration changes after a restart, the writer can remove the exact terms produced by the old analyzer rather than trying to reconstruct them with the new rules.
@@ -83,7 +83,7 @@ AddBatch executes the same flow for every document in a single transaction. If a
 
 ## Reading and Querying
 
-A Term Query scans the posting-key prefix for a term. Fixed-width document IDs make those postings naturally ordered. A Match Query analyzes its input before combining terms with AND or OR. A Boolean Query composes arbitrary child queries. A Phrase Query checks ordered positions for documents common to all terms. Prefix and Fuzzy queries first expand the term dictionary and then score the expanded terms.
+A Term Query scans the posting-key prefix for a term and sorts postings by string ID. A Match Query analyzes its input before combining terms with AND or OR. A Boolean Query composes arbitrary child queries. A Phrase Query checks ordered positions for string IDs common to all terms. Prefix and Fuzzy queries first expand the term dictionary and then score the expanded terms.
 
 The query-string parser uses the precedence `NOT > AND > OR`; adjacent clauses imply OR. It supports parentheses, `field:value`, `"phrase"`, and a trailing `*` prefix wildcard.
 
@@ -109,7 +109,7 @@ An index must not be reused after `Close`. BboltStore copies matching keys and v
 
 ## Recovery and Auditing
 
-`Check` compares the global document count with stored document metadata and verifies each term's document frequency against its actual posting count. `Rebuild` treats `document/*` as the only source of truth, removes all derived keys, and atomically recreates them with the current analyzer. If an original document is corrupt, Rebuild fails and rolls the transaction back.
+`Check` compares the global document count with stored document metadata and verifies each term's document frequency against its actual posting count. `Rebuild` treats `document/*` as the only source of truth, removes all derived keys, and atomically recreates them with the current analyzer while preserving every string ID. It also removes legacy `id/*` mappings, so it can migrate an early numeric-ID schema to the string-ID schema. If an original document is corrupt, Rebuild fails and rolls the transaction back.
 
 ## Advanced Capabilities
 

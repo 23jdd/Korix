@@ -1,5 +1,9 @@
 # 设计决策
 
+## 为什么全链路使用字符串 ID
+
+`Document.ID` 已经是调用者定义的唯一标识，因此 Koris 直接把它用于 document key、metadata、posting、Hit 和全部 API。这样不需要维护 `string ↔ uint64` 映射、数字分配器或两套 ID 生命周期。字段/term/ID 在 key 中使用 URL-safe Base64 编码，所以包含斜杠、Unicode 或 URL 的字符串仍能安全存储。代价是 posting 比纯数字 ID 稍大，但 API 和调试语义更简单。
+
 ## 为什么使用 Store 接口
 
 索引层只依赖 `Get/Put/Delete/Scan/Transaction`，因此测试可使用零配置 MemoryStore，生产可使用 Bbolt，未来也能实现 Pebble、Badger 或远程事务 KV，而不改变 analyzer/query。Scan 返回快照迭代器，避免把底层事务生命周期泄漏给调用者。
